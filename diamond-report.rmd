@@ -1,0 +1,515 @@
+---
+title: "Diamond Supplier Report"
+author: "Justin Bangtson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+html_document:
+    toc: true
+    toc_depth: 6
+    number_sections: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    code_download: true
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+
+library(tidyverse)
+library(scales)
+library(ggplot2)
+library(hrbrthemes)
+library(reshape2)
+
+
+d <- read_tsv("diamond-data.txt")
+```
+
+
+### Introduction
+This report is an analysis on the diamonds dataset and what terms make impacts on the prices of the diamonds. This analysis will have seven sections. The first section will assess the model built for evaluating the price. The second section will look at the cut of the diamonds, and the relationship the other terms have on the diamond's cut. Third, this report will explore the interaction of the color and carat of the diamonds. Similarly, fourth, this report will explore the interaction of the color and clarity. The fifth section will detail the importance of the interaction terms within the model. The sixth section will assess important terms to determine he price of the diamonds other than the carat. Lastly, in this report we will build a training model and use that model to attempt predicting the price of diamonds. 
+
+### Model Building
+
+```{r model_building}
+
+# Convert to factors
+d <- d %>% 
+  mutate(
+    clarity = fct_reorder(clarity,price),
+    cut = fct_reorder(cut,price),
+    color = fct_reorder(color,price)
+  )
+
+# To make life easier, let's collapse clarity and color to fewer levels
+d <- d %>%
+  mutate(
+    grp_clarity = case_when(
+      clarity %in% c("IF", "VVS1", "VVS2") ~ "High Clarity",
+      clarity %in% c("VS1", "VS2") ~ "Medium Clarity",
+      clarity %in% c("SI1", "SI2", "I1") ~ "Low Clarity",
+      TRUE ~ as.character(clarity)  # This line handles any unexpected categories
+    ),
+    grp_color = case_when(
+      color %in% c("D", "E") ~ "High Color",
+      color %in% c("F", "G") ~ "Medium Color",
+      color %in% c("H", "I", "J") ~ "Low Color"
+    )
+  ) %>% 
+  mutate(grp_color = fct_reorder(grp_color,price),
+         grp_clarity = fct_reorder(grp_clarity,price))
+
+
+# This could have been your original model
+lm_base <- lm(price ~ grp_clarity + grp_color + cut + carat + supplier ,
+              data=d)
+
+# And here's the final model you came up with. This model balances
+# the needs of the business with statistical accuracy. 
+lm_final <- lm(price ~ grp_clarity*grp_color + grp_color*carat + cut + supplier,
+          data=d)
+
+#anova(lm_base,lm_final)
+
+#summary(lm_base)
+#summary(lm_final)
+```
+
+
+
+### 1. Assessment of Model Performance
+
+To begin, the model built for this report is to assess the response variable, diamond price, and how the predictor variables vary the response. The predictor variables for the analysis use the clarity and color of the diamonds and the intersection of the two, the diamond's carat values and the intersection of the color and carat, and the diamond's cut and supplier. 
+
+```{r model_assessment}
+lm_final <- lm(price ~ grp_clarity*grp_color + grp_color*carat + cut + supplier,
+          data=d)
+
+summary(lm_final)
+
+```
+
+
+
+The model has an adjusted R-squared over 90%, so the model does well at explaining the variability of price from the predictor variables included. To add there is some unexplained variability in the model, but it does a decent job at explaining the response variable.
+
+### 2. Terms in Model Related to Cut
+
+The cut of the diamonds have a significant impact on the variability of the price of the diamonds. From the highest grade of the diamond's cut, being the ideal quality, the impact on the price can be visualized in Figure 1 below. 
+
+```{r cut_bargraph, message=F, echo=FALSE, fig.cap="Figure 1: Cut quality affects the price of diamonds significantly. From the ideal quality prices decrease as shown, with the lowest quality on the very left, increasing with quality to the right. The lowest quality, fair, decreases the diamond pricing by nearly $1,400. There is a very slight decrease in cost from a very good quality to the premium quality."}
+
+coefficients_summary <- summary(lm_final)$coefficients
+coefficients_tibble <- as_tibble(coefficients_summary)
+
+
+cut_premium <- unlist(coefficients_tibble[9,1])
+cut_vgood <- unlist(coefficients_tibble[7,1])
+cut_good <- unlist(coefficients_tibble[8,1])
+cut_fair <- unlist(coefficients_tibble[10,1])
+
+cut_impacts <- data.frame(
+  price_decrease = c(cut_fair, cut_good, cut_vgood, cut_premium, -5),
+  cut_grades = c("Fair", "Good", "Very Good", "Premium", "Ideal")
+)
+
+cut_impacts$cut_grades = factor(cut_impacts$cut_grades, levels = c("Fair", "Good", "Very Good", "Premium", "Ideal"))
+
+ggplot(cut_impacts, aes(x = cut_grades, y = price_decrease, fill = cut_grades)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "", x = "Cut Quality", y = "Cost in USD") +
+  theme_minimal() +
+  ggtitle("Cut Quality Significantly Impacts Diamond Pricing") +
+  theme(legend.position = "none", 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold")) + 
+  scale_fill_manual(values = c("#80e5ff","#4ddbff","#00b8e6","#005266", "black"))
+
+
+```
+
+Looking at the regression model summary, the intercept is about $-1,400, which is the average price of diamonds with a carat value of 0 (which isn't possible), supplier A, and the highest quality of clarity, color, and cut. So, by looking at the average price, regardless of the other factors, this can be better interpreted; this value is about $3,450. 
+
+From an average of $3,450, in decending order of quality the other qualities of cuts reduce the total average price. The premium and the 'very good' cuts both reduce the price by about $160. Next, the 'good' cuts reduce the average price by about $410. Lastly, the largest impact is when the diamonds have the fair quality, which decreases the price by about $1,400 from the ideal quality.
+
+
+### 3. Interaction: Color and Carat
+
+The diamond color and carat is also significant to the pricing, as well as the relationship between themselves. This segment explores how the color grades affect the carat value of the diamonds. 
+
+As visualized in Figure 2, as the color quality increases, from having color to being colorless, on average the weight of the diamonds decrease. 
+
+
+```{r color_carat_bargraph, message=F, echo=FALSE, fig.cap="Figure 2: As the color quality increases, from having color to being colorless, moving from left to right, the weight of the diamonds in carats decreases on average."}
+
+avg_carat_high <- mean(d$carat[d$grp_color == "High Color"])
+avg_carat_med <- mean(d$carat[d$grp_color == "Medium Color"])
+avg_carat_low <- mean(d$carat[d$grp_color == "Low Color"])
+
+
+color_carat_relation <- data.frame(
+  avg_carat = c( avg_carat_high, avg_carat_med, avg_carat_low),
+  color_grades = c("High", "Medium", "Low")
+)
+
+color_carat_relation$color_grades = factor(color_carat_relation$color_grades, levels = c("Low", "Medium", "High"))
+
+ggplot(color_carat_relation, aes(x = color_grades, y = avg_carat, fill = color_grades)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous() +
+  labs(title = "", x = "Color Quality", y = "Diamond Weight (in carats)") +
+  theme_minimal() +
+  ggtitle("Average Diamond Weight Decrease with \nIncrease of Color Quality") +
+  theme(legend.position = "none", 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold")) + 
+  scale_fill_manual(values = c("#993d00","#ff751a","#ffb380"))
+
+```
+
+The model summary shows the relationship  the interaction of color quality and carat have on the price of the diamonds. A positive coefficient of nearly 220 for the interaction can be interpreted as the price of diamonds increasing more when the diamonds are at a medium quality compared to a high quality, per carat. Similarly, the coefficient of -1,276 for when the diamonds are of low quality implies that the price of diamonds is negatively impacted, at a higher level than the medium and high quality, per carat. 
+
+
+### 4. Interaction: Color and Clarity
+
+This section of the report explores the relationship between the average price for color and clarity grades of the diamonds.
+
+Looking at Figure 3, it appears that that as the grade of clarity and color increases there is a decrease in average price. Figure 4 below expands this relationship to take a closer look; the highest grade of quality and color appears to have the highest average price based on this data.
+
+
+```{r color_clarity_heatmap, warning = F, message=F, echo=FALSE, fig.cap="Figure 3: As the grade of clarity and color increases there is a decrease in average price; refer to Figure 4 for a closer look at this relationship."}
+
+#ggplot(d, aes(x = factor(grp_color, levels = c("Low Color", "Medium Color", "High Color")), y = factor(grp_clarity, levels = c("Low Clarity", "Medium Clarity", "High Clarity")))) + 
+#  geom_point() +
+#  geom_jitter(width = 0.3, height = 0.3, alpha = 0.03) +
+#  labs(title = "Supplier and Cut", x = "Supplier", y = "Cut")
+
+## This code takes the count
+#counts <- table(d$grp_clarity, d$grp_color)
+
+#df_counts <- as.data.frame.matrix(counts)
+
+#names(df_counts) <- color_grades
+
+#df_counts$clarity_grades <- rownames(df_counts)
+#df_melted <- melt(df_counts, id.vars = "clarity_grades")
+
+
+
+#https://chat.openai.com/share/48ada9ab-df34-405a-874a-92dcc2d2a946
+#Chat gpt taught me something neat
+
+# Average price based on grp_clarity and grp_color
+avg_price <- aggregate(price ~ grp_clarity + grp_color, d, FUN = mean)
+
+
+ggplot(avg_price, aes(x = factor(grp_clarity, levels = c("Low Clarity", "Medium Clarity", "High Clarity")), 
+                      y = factor(grp_color, levels = c("Low Color", "Medium Color", "High Color")), fill = price)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#e6f3ff", high = "#003566") +
+  labs(title = "", x = "Clarity Grade", y = "Color Grade", fill = "Price") +
+  theme_minimal() +
+  ggtitle("Average Prices Decrease with \nIncrease of Clarity and Color Grade") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold"))
+
+
+
+```
+
+By expanding out from larger categories into more precise categories, splitting low quality back into I1, SI2, and SI1 again, the average price of diamonds tends to decrease as the color and clarity grades increase, however a the highest average price is around $8,300 when the clarity and color grades are at the highest. The second highest is when the color grade is 'I' and the clarity grade is 'SI2' with an average price of nearly $7,000. This relationship is shown in Figure 4. 
+
+
+```{r color_clarity_heatmap2,warning = F, message=F, echo=FALSE, fig.cap="Figure 4: "}
+
+#ggplot(d, aes(x = factor(grp_color, levels = c("Low Color", "Medium Color", "High Color")), y = factor(grp_clarity, levels = c("Low Clarity", "Medium Clarity", "High Clarity")))) + 
+#  geom_point() +
+#  geom_jitter(width = 0.3, height = 0.3, alpha = 0.03) +
+#  labs(title = "Supplier and Cut", x = "Supplier", y = "Cut")
+
+
+# Calculate counts and convert to data frame
+counts <- table(d$clarity, d$color)
+df_counts <- as.data.frame.matrix(counts)
+
+# Assign appropriate names to the columns
+names(df_counts) <- c("D", "E", "F", "G", "H", "I", "J")
+
+# Add clarity grades as a column
+df_counts$clarity_grades <- rownames(df_counts)
+
+# Reshape the data frame
+library(reshape2)
+df_melted <- melt(df_counts, id.vars = "clarity_grades")
+
+
+avg_price <- aggregate(price ~ clarity + color, d, FUN = mean)
+
+
+# Plot the heatmap
+ggplot(avg_price, aes(x = factor(clarity, levels = c("I1", "SI2", "SI1", "VS2", "VS1", "VVS2", "VVS1", "IF")), 
+                      y = factor(color, levels = c("J", "I", "H", "G", "F", "E", "D")), fill = price)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#e6f3ff", high = "#003566") +
+  labs(title = "", x = "Clarity Grade", y = "Color Grade", fill = "Count") +
+  theme_minimal() +
+  ggtitle("Some High Prices Mean Lower Clarity/Color Quality; \nHighest Prices Match Top Grades.") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold"))
+
+```
+
+The model shows the relationship the intersection of color quality and clarity quality have on the price of the diamonds. On average, the price of diamonds when the quality is of high clarity and high color is nearly $2,900. The impact of a decrease in color grade on price is larger based on the interaction coefficients. When the color and clarity quality are medium, the average price of diamonds increases by around $300 and when they are both low the price increases by almost $700 from the high clarity and color price average. However, when the color is medium and the clarity is low, the average price decreases by nearly $160 and if the clarity is medium while the color is low the average price increases by nearly $530 from the high clarity and color price average.
+
+
+### 5. Significance of the Interaction Terms In Model
+
+The previous two sections, three and four, have demonstrated how the intersection of color grade and carat, and color grade and clarity grade affect the price of the diamonds from the suppliers. This section explains the significance that the two intersections have to the model. 
+
+In using the interaction terms detailed in the previous two sections, the model explains nearly 1% more of the variance in price than if the model only included the terms without the interaction terms; from 89.7% to 90.4%. It may seem negligible, but it has increased the prediction power of the model. It also gives insight into how the terms interact with one another, and how that affects the price. 
+
+Without domain knowledge, one can learn more about diamonds using the interaction of the terms. As the carat decreases, the color quality increases and this may suggest that the more the diamond cutter shaves from the diamond, the worse it is for the price they sell for due to the impact that the weight of diamonds have on price, but they may be shaving the lower color grades from the diamonds to increase the overall color grade. 
+
+### 6. Important Terms to Determine Price 
+#### (Other than carat)
+
+Other than the weight of the diamonds, the cut, and the interaction terms detailed in the last three sections, the other important terms provided in the model are the standalone color and clarity of the diamonds, shown in Figure 5 and 6, respectively. There is nearly 10% of the variance not accounted for in the model, so there are other terms and/or interaction terms that we are missing in the model that could further increase the predictive power of the model.
+
+```{r color_bargraph, message=F, echo=FALSE, fig.cap="Figure 5: Color quality affects the price of diamonds significantly. From the highest quality prices decrease as shown, with the lowest quality on the very left, increasing with quality to the right. The lowest quality, low quality, decreases the diamond pricing by over $550. There is a very slight increase in price from a low quality to the medium quality."}
+
+
+coefficients_summary <- summary(lm_final)$coefficients
+coefficients_tibble <- as_tibble(coefficients_summary)
+
+
+color_medium <- unlist(coefficients_tibble[4,1])
+color_low <- unlist(coefficients_tibble[5,1])
+
+
+
+color_impacts <- data.frame(
+  price_decrease = c(color_low, color_medium),
+  color_grades = c("Low Quality", "Medium Quality")
+)
+
+color_impacts$color_grades = factor(color_impacts$color_grades, levels = c("Low Quality", "Medium Quality"))
+
+ggplot(color_impacts, aes(x = color_grades, y = price_decrease, fill = color_grades)) +
+  geom_bar(stat = "identity") +
+  scale_y_reverse(labels = dollar_format()) +
+  labs(title = "", x = "Color Quality", y = "Cost in USD") +
+  theme_minimal() +
+  ggtitle("Color Quality Impacts Diamond Pricing") +
+  theme(legend.position = "none", 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold")) + 
+  scale_fill_manual(values = c("#00b8e6","#005266"))
+
+
+```
+
+
+```{r clarity_bargraph, message=F, echo=FALSE, fig.cap="Figure 6: Clarity quality affects the price of diamonds significantly. From the highest quality prices decrease as shown, with the lowest quality on the very left, increasing with quality to the right. The lowest quality, low quality, decreases the diamond pricing by over $2,000. There is an increase in price from a low quality to the medium quality of nearly $1,000."}
+
+
+coefficients_summary <- summary(lm_final)$coefficients
+coefficients_tibble <- as_tibble(coefficients_summary)
+
+
+clarity_medium <- unlist(coefficients_tibble[2,1])
+clarity_low <- unlist(coefficients_tibble[3,1])
+
+
+clarity_impacts <- data.frame(
+  price_decrease = c(clarity_low, clarity_medium),
+  clarity_grades = c("Low Quality", "Medium Quality")
+)
+
+clarity_impacts$clarity_grades = factor(clarity_impacts$clarity_grades, levels = c("Low Quality", "Medium Quality"))
+
+ggplot(clarity_impacts, aes(x = clarity_grades, y = price_decrease, fill = clarity_grades)) +
+  geom_bar(stat = "identity") +
+  scale_y_reverse(labels = dollar_format()) +
+  labs(title = "", x = "Clarity Quality", y = "Cost in USD") +
+  theme_minimal() +
+  ggtitle("Clarity Quality Impacts Diamond Pricing") +
+  theme(legend.position = "none", 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold")) + 
+  scale_fill_manual(values = c("#993d00","#ff751a"))
+
+
+```
+
+### 7. Testing the Model 
+
+By using the model created from the data, this section uses 75% of the data to train a prediction model to explore if the model does a good job at predicting the variance of price from the predictor variables.
+
+
+```{r prediction_model, message=F, echo=FALSE, fig.cap="Figure 7: The blue points is the predicition model results while the red is the actual results. As carat approaches infinity, the model decreases reliability in predicting price. However, from a carat value of 0 to around 2.7, the model can predict the variability in price at an adequate level."}
+
+set.seed(20240301)
+
+training_idx <- sample(nrow(d),size=round(nrow(d)*0.75),replace=F)
+testing_idx <- (1:nrow(d))[!(1:nrow(d)) %in% training_idx]
+training_data <- d[training_idx,]
+testing_data <- d[testing_idx,]
+
+refit_final <- update(lm_final,data=training_data)
+
+# Now take it from here!
+
+for_plot <- testing_data %>% 
+  select(price, carat) %>% 
+  mutate(type="Actuals")
+
+
+for_plot <- for_plot %>% 
+  bind_rows(tibble(
+    carat = testing_data$carat,
+    price = predict(lm_final,newdata=testing_data),
+    type="Prediction"
+  ))
+
+
+ggplot(for_plot, 
+       aes(x=carat,y=price,group=type,color=type, alpha = .05)) + 
+  geom_point() + 
+  geom_smooth(data = subset(for_plot, type == "Actuals"), se = FALSE, color = "red") +
+  geom_smooth(data = subset(for_plot, type == "Prediction"), se = FALSE, color = "#006652") +
+  scale_y_continuous(labels = dollar_format()) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 14, face = "bold"), 
+        axis.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(size=12, color = "black"),
+        axis.text.y = element_text(size=12, face="bold", color = "black"),
+        plot.title = element_text(size = 16, face = "bold")) + 
+  labs(x="Carat",
+       y="Price",
+       title="",
+       color="Source")
+
+
+```
+Looking at Figure 7, the model does a decent job of predicting the price with respect to the weight of the diamonds in carats. The model does better the lighter the diamond, and increases in price variance as the weight of the diamonds increases; when the carat reaches a value of around 2.7, the model becomes unreliable, but before that, it appears to do a good job at predicting price.  
+
+### Report Summary
+
+To conclude, this report started by building a model to predict diamond price, the response variable, using terms within the dataset, and the interaction of some of the terms. The model built was able to explain around 90% of the price variance. Next, the interaction of the terms was explored by looking at the relationship of clarity, color, and carat and how they affected price. The interaction of these terms was then detailed and explained how this improved the model. Then, the report included a section on the remaining terms and how they impacted price and also explained how there is still unexplained variance within the dataset. Finally, the report used 75% of the data to train the model to be used in predicting the remaining 25% of data concerning price in using the diamond's weight; this was mostly successful, although the reliability of the model decreases as the diamond weight increases.
+
+
+## Appendix: Description of the Diamonds Dataset
+
+Our diamonds dataset is a comprehensive collection diamond data from our suppliers, 
+representing various attributes of a large number of diamonds. 
+The dataset includes the following attributes:
+
+- `Carat`: Numeric. Represents the weight of the diamond, measured in carats. A higher carat number indicates a heavier diamond.
+
+- `Cut`: Categorical. Indicates the quality of the cut of the diamond, which affects its symmetry, brightness, and overall appearance. The categories include Fair, Good, Very Good, Premium, and Ideal, with Ideal being the highest quality.
+
+- `Color`: Categorical. Denotes the color grade of the diamond, which ranges from J (lowest grade, more color) to D (highest grade, colorless). The grading scale moves from a noticeable color to colorless.
+
+- `Clarity`: Categorical. Describes the clarity of the diamond, which refers to the absence of inclusions and blemishes. The categories range from I1 (Inclusions 1, lowest clarity) to IF (Internally Flawless, highest clarity).
+
+- `Depth`: Numeric. The depth percentage of the diamond, calculated as the ratio of the diamond's total depth (from table to culet) to its average diameter.
+
+- `Table`: Numeric. Refers to the width of the top facet of the diamond, known as the table, relative to the widest point of the diamond. It is expressed as a percentage.
+
+- `Price`: Numeric. The price of the diamond in US dollars.
+
+- `X`: Numeric. The length of the diamond in millimeters.
+
+- `Y`: Numeric. The width of the diamond in millimeters.
+
+- `Z`: Numeric. The depth of the diamond in millimeters.
+
+- `Supplier`: Categorical. Represents the supplier of the diamonds to a major online marketplace (e.g., Amazon). Each diamond is sourced from one of several suppliers, each with varying reputations and qualities of service. The suppliers are anonymized and labeled as "Supplier A", "Supplier B", "Supplier C", etc.
+
+### End
+
+
+## Assignment Introduction
+
+In business, a common saying is "no good deed goes unpunished," humorously noting how success in one area often leads to increased expectations in others. This has been your experience after your comparative analysis revealed that Supplier B’s prices were reasonable, considering they supplied larger diamonds than Suppliers A and C. 
+
+Your boss, the director of product analytics, loved the analysis where 
+you uncovered that Supplier B's prices were fair, it's just that they had 
+larger diamonds than A and C. And she shared that analysis
+with the product managers of a few different verticals and the full jewelry 
+team. 
+
+Responding to this interest, you are tasked with demystifying your findings and the underpinning model—referred to as `lm_final`—for a broader audience, particularly the jewelry team. Teamed up with a seasoned data scientist, you've refined `lm_final` to not only satisfy statistical rigor but also cater to practical business insights.
+
+This assignment challenges you to translate the complex facets of your analysis into insights that resonate with non-experts. It's an exercise in bridging data science with business acumen, honing your ability to communicate technical findings in an accessible manner. Whether through a detailed report or presentation, your goal is to illuminate the intriguing patterns and implications discovered through your analysis. Use the principles discussed in this week's lecture to respond to specific questions outlined below, ensuring clarity and thoroughness in your explanations.
+
+
+## Model Explanation
+
+<!--
+  As a reminder, this is a Markdown comment, so it doesn't appear in the
+  knitted HTML. 
+  
+  Please make sections for each one of these questions or topics. Explore
+  the idea to an extent that you think makes sense. These answers don't
+  have to be super long. Remember you're writing for an audience 
+  that is good with numbers but maybe don't know technical statistical
+  terms very well.
+  
+  1. Overall Assessment of Model Performance
+  2. Explain the terms in the model related to "cut".
+  3. How do color and carat interact? 
+  4. How do color and clarity interact? 
+  5. How important are the interaction terms? 
+  6. Ignoring carat, what aspect of a diamond is the most important to determining price?
+  7. Refit the model on 75% of the data and predict the remaining 25%. Which 
+     diamonds do you do the best on? Which ones do you do the worst on? You can
+     talk about individual diamonds, but we're more interested in any patterns 
+     you find. (I've made this section for you to get you started.)
+     
+     
+  General Tips:
+
+  * Keep It Simple: Use everyday language to explain statistical concepts, avoiding jargon as much as possible.
+  * Use Visuals: Graphs and charts can convey complex ideas more easily than text, making your explanations
+    clearer to a non-technical audience.
+  * Offer Examples: Provide examples from the data to make abstract concepts tangible.
+  * Be Concise: Given the non-technical audience, focus on clear, 
+    direct explanations without overloading on details.  
+
+
+-->
