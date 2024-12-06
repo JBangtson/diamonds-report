@@ -1,8 +1,14 @@
 # Diamond Analysis💎
 
 This report is an analysis on the diamonds dataset and what terms make impacts on the prices of the diamonds. This analysis will have seven sections. The first section will assess the model built for evaluating the price. The second section will look at the cut of the diamonds, and the relationship the other terms have on the diamond's cut. Third, this report will explore the interaction of the color and carat of the diamonds. Similarly, fourth, this report will explore the interaction of the color and clarity. The fifth section will detail the importance of the interaction terms within the model. The sixth section will assess important terms to determine he price of the diamonds other than the carat. Lastly, in this report we will build a training model and use that model to attempt predicting the price of diamonds. 
+
+
 ![Figure 1](assets/cut_quality_price.png)
+
+
 ![Figure 2](assets/weight_color_quality.png)
+
+
 ![Figure 3](assets/average_price_color_clarity.png)
 
 
